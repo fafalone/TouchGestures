@@ -5,7 +5,7 @@ Class Form1
     Option Explicit
     /*******************************************************************
     Touch Gestures Demo with Direct2D - ManipulationProcessor version
-    Version 1.0.1
+    Version 1.1.2
     (c) 2026 
     https://github.com/fafalone/TouchGestures
    
@@ -21,8 +21,12 @@ Class Form1
     Requirements:
      - Windows 8+
      - Reference: Windows Development Library for twinBASIC v9.4.730+ 
+     
+     **Update - v1.1.2**
+     -Add the two-finger tap functionality the WM_GESTURE version has;
+       This also shows how to track the number of touch points.
     
-    *******************************************************************/  
+    *******************************************************************/
     Private m_cFactory            As ID2D1Factory
     Private m_cWICFactory         As WICImagingFactory
     Private m_cRenderTarget       As ID2D1DeviceContext
@@ -40,7 +44,22 @@ Class Form1
     Private m_tPanOffset          As D2D1_POINT_2F
     Private m_fCurrentBlur        As Single
     Private m_lActivePointers     As Long
-    Private m_bInertiaRunning     As Boolean
+    ' --- Two-finger tap tracking (manual, since IManipulationProcessor has no tap event) ---
+    Private Const TAP_MAX_MOVE_PX      As Long = 10     ' slop threshold, matches typical touch tap tolerance
+    Private Const TAP_MAX_DURATION_MS  As Long = 400    ' max down->up time to still count as a tap
+
+    Private m_lTapPtrId1   As Long
+    Private m_lTapPtrId2   As Long
+    Private m_tTapDownPos1 As POINT
+    Private m_tTapDownPos2 As POINT
+    Private m_dwTapDownTime1 As Long
+    Private m_dwTapDownTime2 As Long
+    Private m_lActiveTapPointers As Long   ' count of currently-down pointers tracked for tap purposes
+    Private m_bTapCandidateValid As Boolean
+    Private m_dTapStartScale    As Double
+    Private m_tTapStartPan      As D2D1_POINT_2F
+    Private m_dTapStartRotation As Double
+    
     
     Private WithEvents m_cManip As ManipulationProcessor
   
@@ -162,6 +181,56 @@ Class Form1
         ApplyCombinedTransform
         InvalidateRect Picture1.hWnd, ByVal vbNullPtr, CTRUE
     End Sub
+    
+    Private Function IsTwoFingerTap(ByVal lLastUpId As Long, ByRef tLastUpPos As POINT) As Boolean
+        Dim dwNow As Long
+        dwNow = GetTickCount()
+
+        ' Duration check — both pointers must have lifted within the time window of their down
+        If (dwNow - m_dwTapDownTime1) > TAP_MAX_DURATION_MS Then Exit Function
+        If (dwNow - m_dwTapDownTime2) > TAP_MAX_DURATION_MS Then Exit Function
+
+        ' Movement check — the pointer that just went up must be close to its down position.
+        ' (The other pointer's up position isn't available here since WM_POINTERUP only reports
+        ' the lifting pointer; we rely on ManipulationProcessor's own slop having not triggered
+        ' a scale/rotate/pan of significance — see note below.)
+        Dim tRefDown As POINT
+        If lLastUpId = m_lTapPtrId1 Then
+            tRefDown = m_tTapDownPos1
+        ElseIf lLastUpId = m_lTapPtrId2 Then
+            tRefDown = m_tTapDownPos2
+        Else
+            Exit Function
+        End If
+
+        If Abs(tLastUpPos.x - tRefDown.x) > TAP_MAX_MOVE_PX Then Exit Function
+        If Abs(tLastUpPos.y - tRefDown.y) > TAP_MAX_MOVE_PX Then Exit Function
+
+        ' Also guard against the manipulation having accumulated any real scale/rotation/pan
+        ' during this gesture — a genuine tap shouldn't have moved the image at all.
+        If Abs(m_dCurrentScale - m_dTapStartScale) > 0.01 Then Exit Function
+        If Abs(m_dCurrentRotation - m_dTapStartRotation) > 0.01 Then Exit Function
+        If Abs(m_tPanOffset.x - m_tTapStartPan.x) > CSng(TAP_MAX_MOVE_PX) Then Exit Function
+        If Abs(m_tPanOffset.y - m_tTapStartPan.y) > CSng(TAP_MAX_MOVE_PX) Then Exit Function
+
+        IsTwoFingerTap = True
+    End Function
+
+    Private Sub OnTwoFingerTap(ByRef tPos1 As POINT, ByRef tPos2 As POINT)
+        ' Two-finger tap detected — hook up whatever action you want here.
+        ' Original WM_GESTURE handler likely toggled something (e.g. reset zoom/rotation,
+        ' or toggle a UI element). Example: reset the view to identity.
+        m_dCurrentScale = 1
+        m_dCumulativeScale = 1
+        m_dCurrentRotation = 0
+        m_dCumulativeRotation = 0
+        m_tPanOffset.x = 0
+        m_tPanOffset.y = 0
+
+        ApplyCombinedTransform
+        InvalidateRect Picture1.hWnd, ByVal vbNullPtr, CTRUE
+    End Sub
+    
     Private Sub ApplyCombinedTransform()
         Dim tScaleMatrix  As D2D1_MATRIX_3X2_F
         Dim tRotateMatrix As D2D1_MATRIX_3X2_F
@@ -188,18 +257,38 @@ Class Form1
     Private Function WndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr, ByVal uidSubclass As LongPtr, ByVal dwRefData As LongPtr) As LongPtr
         Select Case uMsg
             
-            Case WM_POINTERDOWN
-                Dim lPtrIdDown As Long
-                lPtrIdDown = GET_POINTERID_WPARAM(wParam)
+        Case WM_POINTERDOWN
+            Dim lPtrIdDown As Long
+            lPtrIdDown = GET_POINTERID_WPARAM(wParam)
 
-                Dim tPtDown As POINT
-                tPtDown.x = GET_X_LPARAM(lParam)
-                tPtDown.y = GET_Y_LPARAM(lParam)
-                ScreenToClient hWnd, tPtDown
+            Dim tPtDown As POINT
+            tPtDown.x = GET_X_LPARAM(lParam)
+            tPtDown.y = GET_Y_LPARAM(lParam)
+            ScreenToClient hWnd, tPtDown
 
-                m_cManip.ProcessDown lPtrIdDown, CSng(tPtDown.x), CSng(tPtDown.y)
-                Return 0
+            m_cManip.ProcessDown lPtrIdDown, CSng(tPtDown.x), CSng(tPtDown.y)
 
+            ' --- tap tracking ---
+            m_lActiveTapPointers = m_lActiveTapPointers + 1
+            If m_lActiveTapPointers = 1 Then
+                m_lTapPtrId1 = lPtrIdDown
+                m_tTapDownPos1 = tPtDown
+                m_dwTapDownTime1 = GetTickCount()
+                m_bTapCandidateValid = True
+            ElseIf m_lActiveTapPointers = 2 Then
+                m_lTapPtrId2 = lPtrIdDown
+                m_tTapDownPos2 = tPtDown
+                m_dwTapDownTime2 = GetTickCount()
+                m_dTapStartScale = m_dCurrentScale
+                m_dTapStartRotation = m_dCurrentRotation
+                m_tTapStartPan = m_tPanOffset
+            Else
+                ' 3rd+ pointer — no longer a clean two-finger tap
+                m_bTapCandidateValid = False
+            End If
+
+            Return 0
+            
             Case WM_POINTERUPDATE
                 Dim lPtrIdMove As Long
                 lPtrIdMove = GET_POINTERID_WPARAM(wParam)
@@ -222,8 +311,23 @@ Class Form1
                 ScreenToClient hWnd, tPtUp
 
                 m_cManip.ProcessUp lPtrIdUp, CSng(tPtUp.x), CSng(tPtUp.y)
+
+                ' --- tap tracking ---
+                If m_lActiveTapPointers > 0 Then m_lActiveTapPointers = m_lActiveTapPointers - 1
+
+                If m_bTapCandidateValid And m_lActiveTapPointers = 0 Then
+                    ' both fingers now up — check if this was a clean two-finger tap
+                    If IsTwoFingerTap(lPtrIdUp, tPtUp) Then
+                        OnTwoFingerTap m_tTapDownPos1, m_tTapDownPos2
+                    End If
+                End If
+
+                If m_lActiveTapPointers = 0 Then
+                    m_bTapCandidateValid = False
+                End If
+
                 Return 0
-            
+                
             Case WM_SIZE
                 Dim lWidth  As Long
                 Dim lHeight As Long
