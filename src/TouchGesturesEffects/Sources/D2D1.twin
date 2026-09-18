@@ -1,0 +1,159 @@
+Module D2D1
+
+    Public Function ColorF( _
+                    ByVal eColor As D2D1_COLORS, _
+                    Optional ByVal fAlpha As Single = 1!) As D2D1_COLOR_F
+        Dim bR As Byte
+        Dim bB As Byte
+        Dim bG As Byte
+    
+        bB = eColor And &HFF
+        bG = (eColor \ &H100) And &HFF
+        bR = (eColor \ &H10000) And &HFF
+    
+        With ColorF
+    
+        .r = bR / 255!
+        .g = bG / 255!
+        .b = bB / 255!
+        .a = fAlpha
+    
+        End With
+    
+    End Function
+    Public Function RenderTargetProperties( _
+                    ByRef tPixelFormat As D2D1_PIXEL_FORMAT, _
+                    Optional ByVal eType As D2D1_RENDER_TARGET_TYPE = D2D1_RENDER_TARGET_TYPE_DEFAULT, _
+                    Optional ByVal fDpiX As Single, _
+                    Optional ByVal fDpiY As Single, _
+                    Optional ByVal eUsage As D2D1_RENDER_TARGET_USAGE = D2D1_RENDER_TARGET_USAGE_NONE, _
+                    Optional ByVal eMinLevel As D2D1_FEATURE_LEVEL = _
+                    D2D1_FEATURE_LEVEL_DEFAULT) As D2D1_RENDER_TARGET_PROPERTIES
+    
+        With RenderTargetProperties
+    
+        .type = eType
+        .PixelFormat = tPixelFormat
+        .DpiX = fDpiX
+        .DpiY = fDpiY
+        .Usage = eUsage
+        .minLevel = eMinLevel
+    
+        End With
+    
+    End Function
+    
+    Public Function HwndRenderTargetProperties( _
+                    ByVal hWnd As LongPtr, _
+                    ByRef tPixelSize As D2D1_SIZE_U, _
+                    Optional ByVal ePresentOptions As D2D1_PRESENT_OPTIONS = _
+                    D2D1_PRESENT_OPTIONS_NONE) As D2D1_HWND_RENDER_TARGET_PROPERTIES
+    
+        With HwndRenderTargetProperties
+    
+        .hwnd = hWnd
+        .pixelSize = tPixelSize
+        .presentOptions = ePresentOptions
+    
+        End With
+    
+    End Function
+    
+    Public Function Vector2F( _
+                    Optional ByVal fX As Single, _
+                    Optional ByVal fY As Single) As D2D1_VECTOR_2F
+
+        Vector2F.x = fX
+        Vector2F.y = fY
+    
+    End Function
+    Public Function Vector3F( _
+                    Optional ByVal fX As Single, _
+                    Optional ByVal fY As Single, _
+                    Optional ByVal fZ As Single) As D2D1_VECTOR_3F
+
+        Vector3F.x = fX
+        Vector3F.y = fY
+        Vector3F.z = fZ
+    
+    End Function
+    
+    Public Function Matrix3x2F_Identity() As D2D1_MATRIX_3X2_F
+    
+        With Matrix3x2F_Identity
+    
+        .m_11 = 1
+        .m_22 = 1
+    
+        End With
+    
+    End Function
+    
+    Public Function Matrix3x2F_Scale( _
+                    ByRef tSize As D2D1_SIZE_F, _
+                    ByRef tCenter As D2D1_POINT_2F) As D2D1_MATRIX_3X2_F
+    
+        With Matrix3x2F_Scale
+    
+        .m_11 = tSize.width: .m_12 = 0!
+        .m_21 = 0!: .m_22 = tSize.Height
+        .m_31 = tCenter.x - tSize.width * tCenter.x
+        .m_32 = tCenter.y - tSize.Height * tCenter.y
+    
+        End With
+    
+    End Function
+    
+    Public Function Matrix3x2F_Scale( _
+                    ByVal fWidth As Single, _
+                    ByVal fHeight As Single, _
+                    ByRef tCenter As D2D1_POINT_2F) As D2D1_MATRIX_3X2_F
+    
+        With Matrix3x2F_Scale
+    
+        .m_11 = fWidth: .m_12 = 0!
+        .m_21 = 0!: .m_22 = fHeight
+        .m_31 = tCenter.x - fWidth * tCenter.x
+        .m_32 = tCenter.y - fHeight * tCenter.y
+    
+        End With
+    
+    End Function
+    
+    Public Function Matrix3x2F_Rotation( _
+                    ByVal fAngle As Single, _
+                    ByRef tCenter As D2D1_POINT_2F) As D2D1_MATRIX_3X2_F
+        Dim tCenter2 As D2D1_POINT_2F
+        tCenter2 = tCenter
+        D2D1MakeRotateMatrix fAngle, tCenter2, Matrix3x2F_Rotation
+    End Function
+
+    Public Function Point2F( _
+                    ByVal fX As Single, _
+                    ByVal fY As Single) As D2D1_POINT_2F
+                
+        Point2F.x = fX
+        Point2F.y = fY
+    
+    End Function
+    
+    Public Function Matrix3x2F_Rotation( _
+                    ByVal fAngle As Single, _
+                    ByVal fCenterX As Single, _
+                    ByVal fCentery As Single) As D2D1_MATRIX_3X2_F
+        D2D1MakeRotateMatrix fAngle, Point2F(fCenterX, fCentery), Matrix3x2F_Rotation
+    End Function
+    
+    Public Function Matrix3x2F_Multiply(ByRef a As D2D1_MATRIX_3X2_F, ByRef b As D2D1_MATRIX_3X2_F) As D2D1_MATRIX_3X2_F
+        Dim tResult As D2D1_MATRIX_3X2_F
+
+        tResult.m_11 = a.m_11 * b.m_11 + a.m_12 * b.m_21
+        tResult.m_12 = a.m_11 * b.m_12 + a.m_12 * b.m_22
+        tResult.m_21 = a.m_21 * b.m_11 + a.m_22 * b.m_21
+        tResult.m_22 = a.m_21 * b.m_12 + a.m_22 * b.m_22
+        tResult.m_31 = a.m_31 * b.m_11 + a.m_32 * b.m_21 + b.m_31
+        tResult.m_32 = a.m_31 * b.m_12 + a.m_32 * b.m_22 + b.m_32
+
+        Return tResult
+    End Function
+End Module

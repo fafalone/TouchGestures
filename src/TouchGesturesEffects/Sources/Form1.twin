@@ -1,0 +1,374 @@
+[Description("TouchGesturesEffects.Form")]
+[FormDesignerId("205135CE-7875-4EDD-931A-14F2F5F2D8FB")]
+[PredeclaredId]
+Class Form1
+   /*******************************************************************
+   Touch Gestures Demo with Direct2D - Effects version
+   Version 1.0.1
+   (c) 2026 
+   https://github.com/fafalone/TouchGestures
+   
+   Author: Jon Johnson
+   
+   Description: This project shows how to implement touchscreen
+     gesture handling in order to manipulate an image that is
+     rendered by Direct2D. It supports Pinch-to-zoom, Rotate, 
+     Pan (with two fingers), and 2-finger taps.
+     In this version, WM_GESTURE is used for gesture processing.
+   
+   Requirements:
+    - Windows 7+
+    - Reference: Windows Development Library for twinBASIC v9.4.730+  
+   
+   *******************************************************************/     
+    Option Explicit
+    
+    Private m_cFactory            As ID2D1Factory
+    Private m_cWICFactory         As WICImagingFactory
+    Private m_cRenderTarget       As ID2D1DeviceContext
+    Private m_cEffect             As ID2D1Effect
+    Private m_cEffect2            As ID2D1Effect
+    Private m_dCumulativeScale    As Double
+    Private m_dGestureStartDist   As Double
+    Private m_dCurrentScale       As Double
+    Private m_tZoomCenter         As D2D1_POINT_2F
+    Private m_dCumulativeRotation As Double
+    Private m_dCurrentRotation    As Double
+    Private m_tRotateCenter       As D2D1_POINT_2F
+    Private m_lRotateStartRaw     As Long
+    Private m_tPanLastPos         As POINT
+    Private m_tPanOffset          As D2D1_POINT_2F
+    Private m_fCurrentBlur        As Single
+    
+    Private Sub Form_Load()
+        Dim cBitmap     As ID2D1Bitmap
+        Dim cHwndTgt    As ID2D1HwndRenderTarget
+
+        ' Create a factory
+        D2D1CreateFactory D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_ID2D1Factory, ByVal vbNullPtr, m_cFactory
+    
+        ' Create render target 
+    
+        Set m_cRenderTarget = m_cFactory.CreateHwndRenderTarget( _
+                D2D1.RenderTargetProperties(toType(Of D2D1_PIXEL_FORMAT)(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN)), _
+                D2D1.HwndRenderTargetProperties(Picture1.hWnd, toType(Of D2D1_SIZE_U)(0&, 0&)) _
+                )
+    
+        Set cHwndTgt = m_cRenderTarget
+    
+        cHwndTgt.Resize toType(Of D2D1_SIZE_U)(CLng(Picture1.ScaleWidth), _
+                                               CLng(Picture1.ScaleHeight))
+
+        Set cBitmap = LoadImageD2D(App.Path & "\image_01.jpg", m_cRenderTarget)
+        
+        m_dCumulativeScale = 1
+        m_dCurrentScale = 1
+ 
+        ' Chain all the effects you want:
+        Set m_cEffect = m_cRenderTarget.CreateEffect(CLSID_D2D12DAffineTransform)
+        Set m_cEffect2 = m_cRenderTarget.CreateEffect(CLSID_D2D1GaussianBlur)
+        
+        m_cEffect.SetInput 0, cBitmap
+        m_cEffect2.SetInput 0, m_cEffect 'You'll render from the last
+        
+        ' Initialize to identity so the image displays correctly before any
+        ' gesture has occurred.
+        Dim tIdentity As D2D1_MATRIX_3X2_F
+        tIdentity.m_11 = 1
+        tIdentity.m_22 = 1
+        m_cEffect.SetValue D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, D2D1_PROPERTY_TYPE_UNKNOWN, tIdentity, LenB(Of D2D1_MATRIX_3X2_F)
+        m_cEffect2.SetValue D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_PROPERTY_TYPE_UNKNOWN, D2D1_BORDER_MODE_HARD, 4
+        sldValue_Change()
+        SetWindowSubclass Picture1.hWnd, AddressOf WndProc, Picture1.hWnd
+    End Sub
+    
+    Private Sub sldValue_Change()
+        m_fCurrentBlur = CSng(sldValue.Value / 10)
+        ApplyCombinedTransform
+        InvalidateRect Picture1.hWnd, ByVal vbNullPtr, CTRUE
+    End Sub
+    
+    Private Sub sldValue_Scroll()
+        sldValue_Change
+    End Sub
+    
+    
+    Private Function LoadImageD2D( _
+                     ByRef sPath As String, _
+                     ByVal cRenderTarget As ID2D1RenderTarget) As ID2D1Bitmap
+        Dim cDecoder        As IWICBitmapDecoder
+        Dim cFrameDecode    As IWICBitmapFrameDecode
+        Dim cConverter      As IWICFormatConverter
+
+        If m_cWICFactory Is Nothing Then
+            Set m_cWICFactory = New WICImagingFactory
+        End If
+
+        Set cDecoder = m_cWICFactory.CreateDecoderFromFilename(StrPtr(sPath), ByVal vbNullPtr, GENERIC_READ, WICDecodeMetadataCacheOnLoad)
+        Set cFrameDecode = cDecoder.GetFrame(0)
+        Set cConverter = m_cWICFactory.CreateFormatConverter()
+
+        cConverter.Initialize cFrameDecode, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, Nothing, 0, WICBitmapPaletteTypeMedianCut
+
+        Set LoadImageD2D = cRenderTarget.CreateBitmapFromWicBitmap(ByVal cConverter, ByVal vbNullPtr)
+
+    End Function
+
+    'Using Picture1_Paint causes flashing and lag
+    Private Sub OnPaint()
+        Dim ps As PAINTSTRUCT
+        Dim hdc As LongPtr
+
+        hdc = BeginPaint(hWnd, ps)
+        m_cRenderTarget.BeginDraw
+        m_cRenderTarget.Clear D2D1.ColorF(DarkGray)
+        m_cRenderTarget.DrawImage m_cEffect2, ByVal vbNullPtr, ByVal vbNullPtr
+        m_cRenderTarget.EndDraw
+        EndPaint hWnd, ps
+    End Sub
+    
+    Private Sub ApplyZoomTransform(ByVal dScale As Double, ByRef tCenter As D2D1_POINT_2F)
+        Dim tMatrix As D2D1_MATRIX_3X2_F
+
+        tMatrix = D2D1.Matrix3x2F_Scale( _
+                      toType(Of D2D1_SIZE_F)(CSng(dScale), CSng(dScale)), _
+                      tCenter)
+
+        m_cRenderTarget.SetTransform tMatrix
+    End Sub
+    Private Sub ApplyRotateTransform(ByVal dAngleRadians As Double, ByRef tCenter As D2D1_POINT_2F)
+        Dim dDegrees As Double
+        dDegrees = dAngleRadians * (180.0# / 3.14159265#)
+
+        Dim tMatrix As D2D1_MATRIX_3X2_F
+        tMatrix = D2D1.Matrix3x2F_Rotation(CSng(dDegrees), tCenter)
+
+        m_cRenderTarget.SetTransform tMatrix
+    End Sub
+    
+    Private Sub ApplyCombinedTransform()
+        Dim tScaleMatrix  As D2D1_MATRIX_3X2_F
+        Dim tRotateMatrix As D2D1_MATRIX_3X2_F
+        Dim tCombined     As D2D1_MATRIX_3X2_F
+
+        tScaleMatrix = D2D1.Matrix3x2F_Scale( _
+                           toType(Of D2D1_SIZE_F)(CSng(m_dCurrentScale), CSng(m_dCurrentScale)), _
+                           m_tZoomCenter)
+
+        tRotateMatrix = D2D1.Matrix3x2F_Rotation( _
+                           CSng(m_dCurrentRotation * 180.0# / 3.14159265#), _
+                           m_tRotateCenter)
+
+        tCombined = Matrix3x2F_Multiply(tScaleMatrix, tRotateMatrix)
+
+        tCombined.m_31 = tCombined.m_31 + m_tPanOffset.x
+        tCombined.m_32 = tCombined.m_32 + m_tPanOffset.y
+
+        m_cEffect.SetValue D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, D2D1_PROPERTY_TYPE_UNKNOWN, tCombined, LenB(Of D2D1_MATRIX_3X2_F)
+        m_cEffect2.SetValue D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, D2D1_PROPERTY_TYPE_FLOAT, m_fCurrentBlur, 4
+        
+    End Sub
+    
+    Private Function GestureProc(ByVal hwnd As LongPtr, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As LongPtr
+        Dim gi As GESTUREINFO
+        gi.cbSize = LenB(Of GESTUREINFO)
+        
+        Dim ret As BOOL = GetGestureInfo(lParam, gi)
+        
+        If ret = CFALSE Then
+            Debug.Print "GetGestureInfo error 0x" & Hex$(Err.LastDllError)
+            Return 0
+        End If
+        
+        Select Case gi.dwID
+            Case GID_ZOOM
+                Dim tPt As POINT
+                tPt.x = gi.ptsLocation.x
+                tPt.y = gi.ptsLocation.y
+                ScreenToClient hwnd, tPt
+
+                If (gi.dwFlags And GF_BEGIN) = GF_BEGIN Then
+                    ' Starting a new pinch: remember the initial finger distance
+                    ' and the on-screen point to zoom around.
+                    m_dGestureStartDist = CDbl(gi.ullArguments)
+                    m_tZoomCenter.x = CSng(tPt.x)
+                    m_tZoomCenter.y = CSng(tPt.y)
+                Else
+                    If m_dGestureStartDist > 0 Then
+                        Dim dRatio As Double
+                        dRatio = CDbl(gi.ullArguments) / m_dGestureStartDist
+
+                        m_dCurrentScale = m_dCumulativeScale * dRatio
+
+                        ' Clamp to sane bounds so the image can't vanish or blow up
+                        If m_dCurrentScale < 0.1 Then m_dCurrentScale = 0.1
+                        If m_dCurrentScale > 20 Then m_dCurrentScale = 20
+
+                        ' ApplyZoomTransform m_dCurrentScale, m_tZoomCenter
+                        ApplyCombinedTransform
+                
+                        InvalidateRect hwnd, ByVal vbNullPtr, CTRUE
+                    End If
+
+                    If (gi.dwFlags And GF_END) = GF_END Then
+                        ' Pinch finished: bake this gesture's scale into the
+                        ' cumulative total so the next pinch starts from here.
+                        m_dCumulativeScale = m_dCurrentScale
+                        m_dGestureStartDist = 0
+                    End If
+                End If
+                
+            Case GID_ROTATE
+                Dim tRotPt As POINT
+                tRotPt.x = gi.ptsLocation.x
+                tRotPt.y = gi.ptsLocation.y
+                ScreenToClient hwnd, tRotPt
+
+                Dim lRawMasked As Long
+                lRawMasked = CLng(gi.ullArguments And &HFFFF&)
+
+                Dim iRawAngle As Integer
+                If lRawMasked > 32767 Then
+                    iRawAngle = CInt(lRawMasked - 65536)
+                Else
+                    iRawAngle = CInt(lRawMasked)
+                End If
+
+                If (gi.dwFlags And GF_BEGIN) = GF_BEGIN Then
+                    m_lRotateStartRaw = CLng(iRawAngle)
+                    m_tRotateCenter.x = CSng(tRotPt.x)
+                    m_tRotateCenter.y = CSng(tRotPt.y)
+                Else
+                    ' Delta is always against the gesture's START raw value,
+                    ' never the previous message — avoids compounding drift
+                    ' across a long gesture.
+                    Dim dDeltaAngle As Double
+                    dDeltaAngle = GID_ROTATE_ANGLE_FROM_ARGUMENT(iRawAngle) - _
+                                  GID_ROTATE_ANGLE_FROM_ARGUMENT(CInt(m_lRotateStartRaw))
+                    dDeltaAngle = -dDeltaAngle
+ 
+                    m_dCurrentRotation = m_dCumulativeRotation + dDeltaAngle
+
+                    ' ApplyRotateTransform m_dCurrentRotation, m_tRotateCenter
+                    ApplyCombinedTransform
+                
+                    InvalidateRect hwnd, ByVal vbNullPtr, CTRUE
+
+                    If (gi.dwFlags And GF_END) = GF_END Then
+                        m_dCumulativeRotation = m_dCurrentRotation
+                    End If
+                End If
+                
+            Case GID_PAN
+                Dim tPanPt As POINT
+                tPanPt.x = gi.ptsLocation.x
+                tPanPt.y = gi.ptsLocation.y
+                ScreenToClient hwnd, tPanPt
+
+                If (gi.dwFlags And GF_BEGIN) = GF_BEGIN Then
+                    ' First pan message: remember the starting position only,
+                    ' no panning happens yet (matches documented begin behavior).
+                    m_tPanLastPos.x = tPanPt.x
+                    m_tPanLastPos.y = tPanPt.y
+                Else
+                    ' Diff against the PREVIOUS message's position, not the
+                    ' gesture start — pan reports absolute position each time,
+                    ' confirmed against Microsoft's own reference sample.
+                    Dim lDeltaX As Long
+                    Dim lDeltaY As Long
+                    lDeltaX = tPanPt.x - m_tPanLastPos.x
+                    lDeltaY = tPanPt.y - m_tPanLastPos.y
+
+                    m_tPanOffset.x = m_tPanOffset.x + CSng(lDeltaX)
+                    m_tPanOffset.y = m_tPanOffset.y + CSng(lDeltaY)
+
+                    m_tPanLastPos.x = tPanPt.x
+                    m_tPanLastPos.y = tPanPt.y
+
+                    ApplyCombinedTransform
+                
+                    InvalidateRect hwnd, ByVal vbNullPtr, CTRUE
+
+                    If (gi.dwFlags And GF_END) = GF_END Then
+                        ' Nothing to bake into a "cumulative" value here — m_tPanOffset
+                        ' already IS the running total, updated incrementally above.
+                    End If
+                End If
+                
+            Case GID_TWOFINGERTAP
+                ' Reset all transform state to identity — no zoom, no rotation, no pan.
+                m_dCumulativeScale = 1
+                m_dCurrentScale = 1
+                m_dCumulativeRotation = 0
+                m_dCurrentRotation = 0
+                m_tPanOffset.x = 0
+                m_tPanOffset.y = 0
+                m_fCurrentBlur = 0: sldValue.Value = 0
+
+                ApplyCombinedTransform
+                
+                InvalidateRect hwnd, ByVal vbNullPtr, CTRUE
+        End Select
+        
+        CloseGestureInfoHandle(lParam)
+        
+        Return CTRUE
+    End Function
+    
+    Private Function WndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr, ByVal uidSubclass As LongPtr, ByVal dwRefData As LongPtr) As LongPtr
+        Select Case uMsg
+            
+            Case WM_GESTURENOTIFY
+                Dim gc(3) As GESTURECONFIG
+                gc(0).dwID = GID_PAN
+                gc(0).dwWant = GC_PAN
+                gc(0).dwBlock = GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY Or GC_PAN_WITH_SINGLE_FINGER_VERTICALLY Or GC_PAN_WITH_GUTTER Or GC_PAN_WITH_INERTIA
+                gc(1).dwID = GID_ZOOM
+                gc(1).dwWant = GC_ZOOM
+                gc(2).dwID = GID_ROTATE
+                gc(2).dwWant = GC_ROTATE
+                gc(3).dwID	= GID_TWOFINGERTAP
+                gc(3).dwWant = GC_TWOFINGERTAP
+                
+                Dim ret As BOOL = SetGestureConfig(hWnd, 0, 4, gc(0), LenB(Of GESTURECONFIG))
+                
+                
+            Case WM_GESTURE
+                Return GestureProc(hWnd, wParam, lParam)
+                
+            Case WM_SIZE
+                Dim lWidth  As Long
+                Dim lHeight As Long
+
+                lWidth = LOWORD(lParam)
+                lHeight = HIWORD(lParam)
+
+                If Not m_cRenderTarget Is Nothing Then
+                    If lWidth > 0 And lHeight > 0 Then
+                        Dim cHwndTgt As ID2D1HwndRenderTarget
+                        Set cHwndTgt = m_cRenderTarget
+
+                        cHwndTgt.Resize toType(Of D2D1_SIZE_U)(CLng(lWidth), CLng(lHeight))
+                    End If
+                End If
+
+                ' Force a repaint now that the target has the correct size
+                InvalidateRect hWnd, ByVal vbNullPtr, 0
+                
+            Case WM_ERASEBKGND
+                ' D2D owns this surface entirely — never let GDI erase it
+                Return 1
+            
+            Case WM_PAINT
+                OnPaint
+                Return 0
+                
+            Case WM_DESTROY
+                RemoveWindowSubclass(hWnd, AddressOf WndProc, uidSubclass)
+        End Select
+        
+        Return DefSubclassProc(hWnd, uMsg, wParam, lParam)
+
+    End Function
+    
+End Class

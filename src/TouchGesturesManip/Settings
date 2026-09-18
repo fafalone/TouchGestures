@@ -1,0 +1,81 @@
+{
+	"configuration.inherits": "Defaults",
+	"project.appTitle": "TouchGesturesManip",
+	"project.buildPath": "${SourcePath}\\${ProjectName}.${FileExtension}",
+	"project.buildType": "Standard EXE",
+	"project.description": "Touch Gestures via ManipulationProcessor",
+	"project.exportPathIsV2": true,
+	"project.forceDpiAwarenessAtStartup": "NONE",
+	"project.iconForm": "Form1",
+	"project.id": "{4133892D-EE92-4728-B989-27593DCDA68E}",
+	"project.largeAddressAware": true,
+	"project.name": "TouchGesturesManip",
+	"project.optionExplicit": true,
+	"project.references": [
+		{
+			"hasBeenSplit": true,
+			"id": "{F50B82D0-DCAB-43FE-9631-11959D4A4728}",
+			"isCompilerPackage": true,
+			"licence": "MIT",
+			"name": "[COMPILER PACKAGE] twinBASIC - VB Compatibility Package (Forms)",
+			"path32": "/Packages/WindowsControlsPackage",
+			"path64": "/Packages/WindowsControlsPackage",
+			"publishedDate": "09-FEB-2022",
+			"publishedTime": "15:48:54",
+			"publisher": "TWINBASIC-COMPILER",
+			"symbolId": "VB",
+			"versionBuild": 0,
+			"versionMajor": 0,
+			"versionMinor": 0,
+			"versionRevision": 31
+		},
+		{
+			"id": "{00020430-0000-0000-C000-000000000046}",
+			"lcid": 0,
+			"name": "OLE Automation",
+			"path32": "C:\\Windows\\SysWow64\\stdole2.tlb",
+			"path64": "C:\\Windows\\System32\\stdole2.tlb",
+			"symbolId": "stdole",
+			"versionMajor": 2,
+			"versionMinor": 0
+		},
+		{
+			"id": "{D63CB78D-9F5B-42FE-B94C-A545F2B2BFC3}",
+			"isCompilerPackage": true,
+			"licence": "MIT",
+			"name": "[COMPILER PACKAGE] twinBASIC - Common Controls Compatibility Package",
+			"publisher": "TWINBASIC-COMPILER",
+			"versionBuild": 0,
+			"versionMajor": 0,
+			"versionMinor": 0,
+			"versionRevision": 1
+		},
+		{
+			"autoCtlExt": true,
+			"id": "{1FCDB98D-617D-4995-9736-2ED0E4746A10}",
+			"isLocalPackage": true,
+			"licence": "CC0 1.0 Universal",
+			"name": "[IMPORTED] Windows Development Library for twinBASIC v9.4.730",
+			"path32": "/Packages/WinDevLib",
+			"path64": "/Packages/WinDevLib",
+			"publishedDate": "18-SEP-2026",
+			"publishedTime": "00:36:13",
+			"publisher": "fafalone",
+			"symbolId": "WinDevLib",
+			"versionBuild": "730",
+			"versionMajor": "9",
+			"versionMinor": "4",
+			"versionRevision": "0"
+		}
+	],
+	"project.settingsVersion": 1,
+	"project.startupObject": "Form1",
+	"project.warnings": {
+		"errors": [],
+		"hints": [],
+		"ignored": [],
+		"info": [],
+		"warnings": []
+	},
+	"runtime.useUnicodeStandardLibrary": true
+}

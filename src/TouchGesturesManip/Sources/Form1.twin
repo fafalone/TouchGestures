@@ -1,0 +1,262 @@
+[Description("")]
+[FormDesignerId("205135CE-7875-4EDD-931A-14F2F5F2D8FB")]
+[PredeclaredId]
+Class Form1
+    Option Explicit
+    /*******************************************************************
+    Touch Gestures Demo with Direct2D - ManipulationProcessor version
+    Version 1.0.1
+    (c) 2026 
+    https://github.com/fafalone/TouchGestures
+   
+    Author: Jon Johnson
+   
+    Description: This project shows how to implement touchscreen
+      gesture handling in order to manipulate an image that is
+      rendered by Direct2D. It supports Pinch-to-zoom, Rotate, 
+      Pan (with two fingers), and 2-finger taps.
+      In this version, WM_POINTER__/ManipulationProcessor is used 
+      for gesture processing.
+   
+    Requirements:
+     - Windows 8+
+     - Reference: Windows Development Library for twinBASIC v9.4.730+ 
+    
+    *******************************************************************/  
+    Private m_cFactory            As ID2D1Factory
+    Private m_cWICFactory         As WICImagingFactory
+    Private m_cRenderTarget       As ID2D1DeviceContext
+    Private m_cEffect             As ID2D1Effect
+    Private m_cEffect2            As ID2D1Effect
+    Private m_dCumulativeScale    As Double
+    Private m_dGestureStartDist   As Double
+    Private m_dCurrentScale       As Double
+    Private m_tZoomCenter         As D2D1_POINT_2F
+    Private m_dCumulativeRotation As Double
+    Private m_dCurrentRotation    As Double
+    Private m_tRotateCenter       As D2D1_POINT_2F
+    Private m_lRotateStartRaw     As Long
+    Private m_tPanLastPos         As POINT
+    Private m_tPanOffset          As D2D1_POINT_2F
+    Private m_fCurrentBlur        As Single
+    Private m_lActivePointers     As Long
+    Private m_bInertiaRunning     As Boolean
+    
+    Private WithEvents m_cManip As ManipulationProcessor
+  
+    Private Sub Form_Load()
+        Dim cBitmap     As ID2D1Bitmap
+        Dim cHwndTgt    As ID2D1HwndRenderTarget
+
+        ' Create a factory
+        D2D1CreateFactory D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_ID2D1Factory, ByVal vbNullPtr, m_cFactory
+    
+        ' Create render target 
+    
+        Set m_cRenderTarget = m_cFactory.CreateHwndRenderTarget( _
+                D2D1.RenderTargetProperties(toType(Of D2D1_PIXEL_FORMAT)(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN)), _
+                D2D1.HwndRenderTargetProperties(Picture1.hWnd, toType(Of D2D1_SIZE_U)(0&, 0&)) _
+                )
+    
+        Set cHwndTgt = m_cRenderTarget
+    
+        cHwndTgt.Resize toType(Of D2D1_SIZE_U)(CLng(Picture1.ScaleWidth), _
+                                               CLng(Picture1.ScaleHeight))
+
+        Set cBitmap = LoadImageD2D(App.Path & "\image_01.jpg", m_cRenderTarget)
+        
+        m_dCumulativeScale = 1
+        m_dCurrentScale = 1
+ 
+        ' Chain all the effects you want:
+        Set m_cEffect = m_cRenderTarget.CreateEffect(CLSID_D2D12DAffineTransform)
+        Set m_cEffect2 = m_cRenderTarget.CreateEffect(CLSID_D2D1GaussianBlur)
+        
+        m_cEffect.SetInput 0, cBitmap
+        m_cEffect2.SetInput 0, m_cEffect 'You'll render from the last
+        
+        ' Initialize to identity so the image displays correctly before any
+        ' gesture has occurred.
+        Dim tIdentity As D2D1_MATRIX_3X2_F
+        tIdentity.m_11 = 1
+        tIdentity.m_22 = 1
+        m_cEffect.SetValue D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, D2D1_PROPERTY_TYPE_UNKNOWN, tIdentity, LenB(Of D2D1_MATRIX_3X2_F)
+        m_cEffect2.SetValue D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_PROPERTY_TYPE_UNKNOWN, D2D1_BORDER_MODE_HARD, 4
+        sldValue_Change()
+        SetWindowSubclass Picture1.hWnd, AddressOf WndProc, Picture1.hWnd
+        
+        Set m_cManip = New ManipulationProcessor
+        m_cManip.put_SupportedManipulations MANIPULATION_ALL
+    End Sub
+    
+    Private Sub sldValue_Change()
+        m_fCurrentBlur = CSng(sldValue.Value / 10)
+        ApplyCombinedTransform
+        InvalidateRect Picture1.hWnd, ByVal vbNullPtr, CTRUE
+    End Sub
+    
+    Private Sub sldValue_Scroll()
+        sldValue_Change
+    End Sub
+    
+    
+    Private Function LoadImageD2D( _
+                     ByRef sPath As String, _
+                     ByVal cRenderTarget As ID2D1RenderTarget) As ID2D1Bitmap
+        Dim cDecoder        As IWICBitmapDecoder
+        Dim cFrameDecode    As IWICBitmapFrameDecode
+        Dim cConverter      As IWICFormatConverter
+
+        If m_cWICFactory Is Nothing Then
+            Set m_cWICFactory = New WICImagingFactory
+        End If
+
+        Set cDecoder = m_cWICFactory.CreateDecoderFromFilename(StrPtr(sPath), ByVal vbNullPtr, GENERIC_READ, WICDecodeMetadataCacheOnLoad)
+        Set cFrameDecode = cDecoder.GetFrame(0)
+        Set cConverter = m_cWICFactory.CreateFormatConverter()
+
+        cConverter.Initialize cFrameDecode, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, Nothing, 0, WICBitmapPaletteTypeMedianCut
+
+        Set LoadImageD2D = cRenderTarget.CreateBitmapFromWicBitmap(ByVal cConverter, ByVal vbNullPtr)
+
+    End Function
+
+    'Using Picture1_Paint causes flashing and lag
+    Private Sub OnPaint()
+        Dim ps As PAINTSTRUCT
+        Dim hdc As LongPtr
+ 
+        hdc = BeginPaint(hWnd, ps)
+        m_cRenderTarget.BeginDraw
+        m_cRenderTarget.Clear D2D1.ColorF(DarkGray)
+        m_cRenderTarget.DrawImage m_cEffect2, ByVal vbNullPtr, ByVal vbNullPtr
+        m_cRenderTarget.EndDraw
+        EndPaint hWnd, ps
+    End Sub
+    
+    Private Sub m_cManip_ManipulationDelta(ByVal x As Single, ByVal y As Single, ByVal translationDeltaX As Single, ByVal translationDeltaY As Single, ByVal scaleDelta As Single, ByVal expansionDelta As Single, ByVal rotationDelta As Single, ByVal cumulativeTranslationX As Single, ByVal cumulativeTranslationY As Single, ByVal cumulativeScale As Single, ByVal cumulativeExpansion As Single, ByVal cumulativeRotation As Single)
+        ' // Pan: accumulate translation directly.
+        m_tPanOffset.x = m_tPanOffset.x + translationDeltaX
+        m_tPanOffset.y = m_tPanOffset.y + translationDeltaY
+
+        ' // Zoom: scaleDelta is a multiplicative factor for THIS delta, not a total —
+        ' // apply it onto the running scale rather than replacing it.
+        m_dCurrentScale = m_dCurrentScale * CDbl(scaleDelta)
+        If m_dCurrentScale < 0.1 Then m_dCurrentScale = 0.1
+        If m_dCurrentScale > 20 Then m_dCurrentScale = 20
+        m_dCumulativeScale = m_dCurrentScale
+
+        ' // Rotate: rotationDelta is in radians per the event signature's convention
+        ' // (matching cumulativeRotation) — accumulate directly.
+        m_dCurrentRotation = m_dCurrentRotation + CDbl(rotationDelta)
+        m_dCumulativeRotation = m_dCurrentRotation
+
+        ' // Pivot: manipulation deltas are reported around the manipulation's own
+        ' // (x, y) origin each event — feed that through as both zoom/rotate center
+        ' // so ApplyCombinedTransform pivots correctly.
+        m_tZoomCenter.x = x
+        m_tZoomCenter.y = y
+        m_tRotateCenter.x = x
+        m_tRotateCenter.y = y
+
+        ApplyCombinedTransform
+        InvalidateRect Picture1.hWnd, ByVal vbNullPtr, CTRUE
+    End Sub
+    Private Sub ApplyCombinedTransform()
+        Dim tScaleMatrix  As D2D1_MATRIX_3X2_F
+        Dim tRotateMatrix As D2D1_MATRIX_3X2_F
+        Dim tCombined     As D2D1_MATRIX_3X2_F
+
+        tScaleMatrix = D2D1.Matrix3x2F_Scale( _
+                           toType(Of D2D1_SIZE_F)(CSng(m_dCurrentScale), CSng(m_dCurrentScale)), _
+                           m_tZoomCenter)
+
+        tRotateMatrix = D2D1.Matrix3x2F_Rotation( _
+                           CSng(m_dCurrentRotation * 180.0# / 3.14159265#), _
+                           m_tRotateCenter)
+
+        tCombined = Matrix3x2F_Multiply(tScaleMatrix, tRotateMatrix)
+
+        tCombined.m_31 = tCombined.m_31 + m_tPanOffset.x
+        tCombined.m_32 = tCombined.m_32 + m_tPanOffset.y
+
+        m_cEffect.SetValue D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, D2D1_PROPERTY_TYPE_UNKNOWN, tCombined, LenB(Of D2D1_MATRIX_3X2_F)
+        m_cEffect2.SetValue D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, D2D1_PROPERTY_TYPE_FLOAT, m_fCurrentBlur, 4
+        
+    End Sub
+    
+    Private Function WndProc(ByVal hWnd As LongPtr, ByVal uMsg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr, ByVal uidSubclass As LongPtr, ByVal dwRefData As LongPtr) As LongPtr
+        Select Case uMsg
+            
+            Case WM_POINTERDOWN
+                Dim lPtrIdDown As Long
+                lPtrIdDown = GET_POINTERID_WPARAM(wParam)
+
+                Dim tPtDown As POINT
+                tPtDown.x = GET_X_LPARAM(lParam)
+                tPtDown.y = GET_Y_LPARAM(lParam)
+                ScreenToClient hWnd, tPtDown
+
+                m_cManip.ProcessDown lPtrIdDown, CSng(tPtDown.x), CSng(tPtDown.y)
+                Return 0
+
+            Case WM_POINTERUPDATE
+                Dim lPtrIdMove As Long
+                lPtrIdMove = GET_POINTERID_WPARAM(wParam)
+
+                Dim tPtMove As POINT
+                tPtMove.x = GET_X_LPARAM(lParam)
+                tPtMove.y = GET_Y_LPARAM(lParam)
+                ScreenToClient hWnd, tPtMove
+
+                m_cManip.ProcessMove lPtrIdMove, CSng(tPtMove.x), CSng(tPtMove.y)
+                Return 0
+
+            Case WM_POINTERUP
+                Dim lPtrIdUp As Long
+                lPtrIdUp = GET_POINTERID_WPARAM(wParam)
+
+                Dim tPtUp As POINT
+                tPtUp.x = GET_X_LPARAM(lParam)
+                tPtUp.y = GET_Y_LPARAM(lParam)
+                ScreenToClient hWnd, tPtUp
+
+                m_cManip.ProcessUp lPtrIdUp, CSng(tPtUp.x), CSng(tPtUp.y)
+                Return 0
+            
+            Case WM_SIZE
+                Dim lWidth  As Long
+                Dim lHeight As Long
+
+                lWidth = LOWORD(lParam)
+                lHeight = HIWORD(lParam)
+
+                If Not m_cRenderTarget Is Nothing Then
+                    If lWidth > 0 And lHeight > 0 Then
+                        Dim cHwndTgt As ID2D1HwndRenderTarget
+                        Set cHwndTgt = m_cRenderTarget
+
+                        cHwndTgt.Resize toType(Of D2D1_SIZE_U)(CLng(lWidth), CLng(lHeight))
+                    End If
+                End If
+
+                ' Force a repaint now that the target has the correct size
+                InvalidateRect hWnd, ByVal vbNullPtr, 0
+                
+            Case WM_ERASEBKGND
+                ' D2D owns this surface entirely — never let GDI erase it
+                Return 1
+            
+            Case WM_PAINT
+                OnPaint
+                Return 0
+                
+            Case WM_DESTROY
+                RemoveWindowSubclass(hWnd, AddressOf WndProc, uidSubclass)
+        End Select
+        
+        Return DefSubclassProc(hWnd, uMsg, wParam, lParam)
+
+    End Function
+    
+End Class
