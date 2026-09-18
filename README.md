@@ -12,3 +12,5 @@ There's two versions:
 TouchGesturesEffects.twinproj - Uses `WM_GESTURE`/`GetGestureInfo` to process gestures. Less advanced but suitable for Windows 7.
 
 TouchGesturesManip.twinproj - Uses `WM_POINTERUP/UPDATE/DOWN` and the system `ManipulationProcessor` class to process gestures. Offers a lot more advanced features (though only pinch-to-zoom/rotate/pan are implemented), as-is though requires Win8+. 
+
+**Requires Windows Development Library for twinBASIC v9.4.730+** - Updated specifically for this project. References->Available packages. If you uncheck 'Embed', it will be available to all projects that link to it.
