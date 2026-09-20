@@ -15,5 +15,8 @@ TouchGesturesManip.twinproj - Uses `WM_POINTERUP/UPDATE/DOWN` and the system `Ma
 
 **Requires Windows Development Library for twinBASIC v9.4.730+** - Updated specifically for this project. References->Available packages. If you uncheck 'Embed', it will be available to all projects that link to it.
 
+**Update - TouchGesturesManip v2.1:** Added InertiaProcessor class so you can now flick the image and it will slowly decelerate and bounce off the sides.
+
+<img width="745" height="604" alt="TouchGest2" src="https://github.com/user-attachments/assets/b73f776b-d3f9-4324-82e9-8683d52937f5" />
 
 **Update - TouchGesturesManip v1.1:** Added two-finger tap functionality like the other project. Also of interest, this shows how to track the number of touch points for advanced multitouch features.
